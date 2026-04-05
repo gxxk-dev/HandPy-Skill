@@ -1,6 +1,12 @@
 # HandPy Tool 使用指南
 
-`handpy_tool.py` 是 HandPy 板子的上位机控制工具，支持串口和 WiFi 两种传输方式。
+`handpy_tool.py` 是 HandPy 板子的上位机控制工具，支持串口和 WiFi 两种传输方式。通过 `pip install -e .` 安装后，也可使用命令 `handpy-tool`。
+
+## 导航
+
+- 安装与命令：串口模式、WiFi 模式、端口与波特率
+- 真机限制：v3 LVGL `tick()` 约束
+- 协议与排障：协议细节、常见故障排查
 
 ---
 

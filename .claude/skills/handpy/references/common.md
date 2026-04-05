@@ -3,7 +3,14 @@
 > 支持版本：v2（ESP32）、v3（ESP32-S3）
 > 不支持：labplus_1956、labplus_classroom_kit_II、labplus-experiment-box-2024、mpython-classroom-kit、labplus_Ledong_v2
 
-**上位机工具**：`handpy_tool.py` 提供串口/WiFi 控制、文件传输、读屏、模拟输入等功能，详见 `./handpy-tool.md`
+**上位机工具**：`handpy_tool.py` 提供串口/WiFi 控制、文件传输、读屏、模拟输入等功能，详见 `./tool.md`
+
+## 导航
+
+- 通用 API：导入、RGB LED、按键、触摸、蜂鸣器、WiFi、IO
+- 传感器：加速度计、陀螺仪、磁力计、声音传感器
+- 兼容性：Python 特性支持
+- 按需扩展：文末模块索引
 
 ---
 
