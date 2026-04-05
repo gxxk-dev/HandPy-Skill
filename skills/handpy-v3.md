@@ -10,6 +10,7 @@
 | 构建系统 | CMake |
 | 用户文件系统 | SPIFFS 2MB（0x6F0000–0x8F0000） |
 | 语音数据分区 | 3.9MB（0x8F0000–0xCBD000） |
+| 可用 RAM | 内部 SRAM 约 64KB（GC heap），LVGL 占用少量；大对象（>512B）自动分配到 PSRAM（8MB+，较慢） |
 | f-string | ✅ 支持 |
 
 ## 引脚分配
@@ -52,19 +53,22 @@ ES8388，I2S，双麦克风阵列 + 扬声器，16kHz/16bit 立体声。
 
 ## LCD / LVGL
 
-启动时 `_boot.py` 自动调用 `lcd.draw_logo()`，用户代码直接使用 LVGL。
+**重要**：使用 LVGL 前必须先 `import lv_displayer`（会自动初始化 display）：
 
 ```python
+import lv_displayer  # 自动调用 __init__，创建 display 对象
 import lvgl as lv
 from lv_utils import event_loop
 
-el = event_loop()   # 默认 25Hz 刷新
+el = event_loop(freq=25)  # 默认 25Hz 刷新
 
-scr = lv.scr_act()
+scr = lv.screen_active()  # LVGL 9.3 API
 label = lv.label(scr)
 label.set_text("Hello HandPy")
 label.align(lv.ALIGN.CENTER, 0, 0)
 ```
+
+**lv_gui.py 封装**：预置的 `lv_gui.py` 已自动 import `lv_displayer`，直接使用即可。提供高级封装（二维码/多边形/位图/按键映射），详见 `./modules/lv_gui.md`。
 
 ### 内置字体
 

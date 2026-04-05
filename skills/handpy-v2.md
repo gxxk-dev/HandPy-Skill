@@ -9,6 +9,7 @@
 | MicroPython | 1.12.0 |
 | 构建系统 | Makefile |
 | 用户文件系统 | SPIFFS（较小） |
+| 可用 RAM | 约 120KB，避免大字符串拼接/大列表/深层递归；分块读文件 |
 | f-string | ❌ 不支持，用 `'%s' % x` 或 `.format()` |
 
 ## 引脚分配

@@ -3,6 +3,10 @@
 > 支持版本：v2（ESP32）、v3（ESP32-S3）
 > 不支持：labplus_1956、labplus_classroom_kit_II、labplus-experiment-box-2024、mpython-classroom-kit、labplus_Ledong_v2
 
+**上位机工具**：`handpy_tool.py` 提供串口/WiFi 控制、文件传输、读屏、模拟输入等功能，详见 `./handpy-tool.md`
+
+---
+
 ## 导入
 
 ```python
