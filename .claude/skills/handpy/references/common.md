@@ -193,7 +193,7 @@ v2 请用 `'Hello %s' % name` 或 `.format()` 替代 f-string。
 | AI 摄像头 | `./modules/smartcamera.md` |
 | 舵机 Servo | `./modules/servo.md` |
 | 掌控拓展板 parrot | `./modules/parrot.md` |
-| 蓝比特 bluebit | `./modules/bluebit.md` |
+| `bluebit` 扩展模块 | `./modules/bluebit.md` |
 | 讯飞语音 | `./modules/xunfei.md` |
 | BLE 蓝牙 | `./modules/mpython_ble.md` |
 | LVGL GUI（v3） | `./modules/lv_gui.md` |

@@ -36,6 +36,3 @@ ir.send(data)
 parrot.MOTOR_1   # 0x01
 parrot.MOTOR_2   # 0x02
 ```
-
-官方文档（v2）：https://mPython.readthedocs.io
-官方文档（v3）：https://mpython-esp32s3-doc.readthedocs.io/zh-cn/latest/

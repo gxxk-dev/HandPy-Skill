@@ -27,5 +27,3 @@ img = lv.img(scr)
 img.set_src("/images/Color/Expression-happy.png")
 img.align(lv.ALIGN.CENTER, 0, 0)
 ```
-
-官方文档：https://mpython-esp32s3-doc.readthedocs.io/zh-cn/latest/

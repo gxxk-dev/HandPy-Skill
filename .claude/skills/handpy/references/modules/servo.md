@@ -30,6 +30,3 @@ s.freq(50)
 | 构造函数 | `Servo(pin)` | `Servo(pin, freq, angle, min_us, max_us, actuation_range)` |
 | 设置角度 | `angle(deg)` | `write_angle(deg)` |
 | 设置频率 | — | `freq(hz)` |
-
-官方文档（v2）：https://mPython.readthedocs.io
-官方文档（v3）：https://mpython-esp32s3-doc.readthedocs.io/zh-cn/latest/

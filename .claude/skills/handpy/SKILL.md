@@ -30,7 +30,7 @@ description: Use for HandPy / mPython / 掌控板 coding and board-control tasks
 - [references/modules/smartcamera.md](references/modules/smartcamera.md): K210 / K230 AI 摄像头
 - [references/modules/servo.md](references/modules/servo.md): 舵机
 - [references/modules/parrot.md](references/modules/parrot.md): 掌控拓展板 / 电机 / 扩展板红外
-- [references/modules/bluebit.md](references/modules/bluebit.md): 蓝比特套件
+- [references/modules/bluebit.md](references/modules/bluebit.md): `bluebit` 扩展模块
 - [references/modules/xunfei.md](references/modules/xunfei.md): 讯飞语音
 - [references/modules/mpython_ble.md](references/modules/mpython_ble.md): BLE
 - [references/modules/lv_gui.md](references/modules/lv_gui.md): `v3` 的 `lv_gui.py` 与 LVGL 页面封装
