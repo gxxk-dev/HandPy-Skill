@@ -1,0 +1,12 @@
+[project]
+name = "handpy-tool"
+version = "0.1.0"
+description = "HandPy (mPython) board control tool"
+requires-python = ">=3.9"
+dependencies = [
+    "mpremote>=1.0",
+    "esptool>=4.0",
+]
+
+[project.scripts]
+handpy-tool = "handpy_tool:main"
