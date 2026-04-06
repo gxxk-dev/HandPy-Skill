@@ -9,6 +9,14 @@ import json
 from pathlib import Path
 
 
+# ── board constants ───────────────────────────────────────────────────────────
+
+V2 = 'v2'
+V3 = 'v3'
+ESP32 = 'esp32'
+ESP32S3 = 'esp32s3'
+
+
 # ── port detection ────────────────────────────────────────────────────────────
 
 def find_port():
@@ -38,6 +46,41 @@ def run(args, port, capture=True):
         return r.stdout
     else:
         subprocess.run(cmd, check=True)
+
+
+# ── board detection ───────────────────────────────────────────────────────────
+
+def detect_board(port=None, host=None, transport='serial'):
+    """自动检测板子型号，返回 (version, chip) 元组
+
+    通过 os.uname() 的最后一个字段判断：
+    - v3: 'mpython pro with ESP32S3'
+    - v2: 'mpython with ESP32'
+
+    Returns:
+        (V2, ESP32) 或 (V3, ESP32S3)
+    """
+    detect_code = "print(list(__import__('os').uname()))"
+
+    if transport == 'wifi' and host:
+        try:
+            result = _wifi_cmd(host, 0x01, detect_code.encode('utf-8'))
+            uname_str = result.decode('utf-8').strip()
+        except:
+            return (V2, ESP32)
+    else:
+        if port is None:
+            port = find_port()
+        try:
+            uname_str = run(['exec', detect_code], port).strip()
+        except:
+            return (V2, ESP32)
+
+    # 检查是否包含 ESP32S3
+    if 'ESP32S3' in uname_str:
+        return (V3, ESP32S3)
+    else:
+        return (V2, ESP32)
 
 
 # ── WiFi transport ────────────────────────────────────────────────────────────
@@ -160,8 +203,13 @@ def cmd_ls(args):
 
 
 def cmd_flash(args):
-    chip = args.chip
     port = args.port or find_port()
+    # 自动检测芯片型号（如果未指定）
+    chip = args.chip or detect_board(port)[1]
+
+    if not args.chip:
+        print(f"Auto-detected chip: {chip}")
+
     cmd = [
         'esptool.py', '--chip', chip, '--port', port,
         '--baud', '460800', 'write_flash', '-z', '0x0', args.firmware
@@ -170,10 +218,20 @@ def cmd_flash(args):
 
 
 def cmd_screen(args):
+    # 自动检测版本（如果未指定）
+    version = args.version
+    if not version:
+        version, _ = detect_board(
+            args.port,
+            getattr(args, 'host', None),
+            getattr(args, 'transport', 'serial')
+        )
+        print(f"Auto-detected: {version}")
+
     if hasattr(args, 'transport') and args.transport == 'wifi':
-        version_byte = 0 if args.version == 'v2' else 1
+        version_byte = 0 if version == V2 else 1
         data = _wifi_cmd(args.host, 0x05, bytes([version_byte]))
-        if args.version == 'v2':
+        if version == V2:
             # v2: base64 解码 + ASCII art
             raw = base64.b64decode(data)
             rows = []
@@ -195,7 +253,7 @@ def cmd_screen(args):
             print(result)
     else:
         port = args.port or find_port()
-        if args.version == 'v2':
+        if version == V2:
             _screen_v2(port, args)
         else:
             _screen_v3(port, args)
@@ -502,7 +560,7 @@ def build_parser():
 
     fl = sub.add_parser('flash', help='Flash firmware')
     fl.add_argument('--firmware', required=True)
-    fl.add_argument('--chip', required=True, choices=['esp32', 'esp32s3'])
+    fl.add_argument('--chip', choices=['esp32', 'esp32s3'], help='Chip type (auto-detect if omitted)')
     fl.set_defaults(func=cmd_flash)
 
     inst = sub.add_parser('install', help='Deploy handpy_server to board')
@@ -526,7 +584,7 @@ def build_parser():
     wifi.set_defaults(func=cmd_wifi)
 
     sc = sub.add_parser('screen', help='Read screen content')
-    sc.add_argument('--version', required=True, choices=['v2', 'v3'])
+    sc.add_argument('--version', choices=['v2', 'v3'], help='Board version (auto-detect if omitted)')
     sc.add_argument('--out', help='Output file (default: stdout)')
     sc.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     sc.add_argument('--host', help='Board IP (wifi transport)')

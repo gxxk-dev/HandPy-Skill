@@ -48,14 +48,15 @@ handpy_tool.py ls --path /
 ### 读取屏幕
 
 ```bash
-# v2 OLED（输出 ASCII art）
-handpy_tool.py screen --version v2
+# 自动检测版本
+handpy_tool.py screen
 
-# v3 LCD（输出 LVGL 组件树 JSON）
-handpy_tool.py screen --version v3
+# 或手动指定版本
+handpy_tool.py screen --version v2  # v2 OLED（输出 ASCII art）
+handpy_tool.py screen --version v3  # v3 LCD（输出 LVGL 组件树 JSON）
 
 # 保存到文件
-handpy_tool.py screen --version v2 --out screen.txt
+handpy_tool.py screen --out screen.txt
 ```
 
 ### 模拟输入
@@ -73,10 +74,11 @@ handpy_tool.py press --touch Y --hold 200
 ### 刷固件
 
 ```bash
-# v2
-handpy_tool.py flash --firmware firmware_v2.bin --chip esp32
+# 自动检测芯片型号
+handpy_tool.py flash --firmware firmware.bin
 
-# v3
+# 或手动指定芯片
+handpy_tool.py flash --firmware firmware_v2.bin --chip esp32
 handpy_tool.py flash --firmware firmware_v3.bin --chip esp32s3
 ```
 
@@ -122,7 +124,10 @@ handpy_tool.py wifi remove --ssid "MyWiFi"
 所有命令都支持 `--transport wifi --host <IP>`：
 
 ```bash
-# 读取屏幕
+# 读取屏幕（自动检测版本）
+handpy_tool.py screen --transport wifi --host 192.168.1.100
+
+# 或手动指定版本
 handpy_tool.py screen --version v2 --transport wifi --host 192.168.1.100
 
 # 模拟按键
