@@ -48,12 +48,14 @@ K230 常见能力包括：
 - `ClassifyMODEL`
 - `DetectMODEL`
 
-典型结果字段示例：
+典型结果字段：
 
-- `cam.yolo_detect.category_name`
-- `cam.yolo_detect.max_score`
-- `cam.yolo_detect.objnum`
-- `cam.face_detect.face_num`
+| 字段 | 类型 | 范围/约束 | 说明 |
+|------|------|-----------|------|
+| `cam.yolo_detect.category_name` | `str` | 依模型标签集而定 | 当前识别类别名 |
+| `cam.yolo_detect.max_score` | `number` | 待确认 | 当前最高置信度分数 |
+| `cam.yolo_detect.objnum` | `int` | `>= 0` | 当前检测到的目标数量 |
+| `cam.face_detect.face_num` | `int` | `>= 0` | 当前检测到的人脸数量 |
 
 ## K210
 
@@ -118,16 +120,21 @@ while True:
     cam.asr.recognize()
 ```
 
-常见结果字段示例：
+常见结果字段：
 
-- `cam.yolo_detect.id`
-- `cam.yolo_detect.max_score`
-- `cam.yolo_detect.objnum`
-- `cam.face_detect.face_num`
-- `cam.fcr.id`
-- `cam.fcr.max_score`
-- `cam.qrcode.info`
-- `cam.track.x`, `cam.track.y`, `cam.track.cx`, `cam.track.cy`
+| 字段 | 类型 | 范围/约束 | 说明 |
+|------|------|-----------|------|
+| `cam.yolo_detect.id` | `int` | 依当前模型标签 ID 而定 | 当前识别到的类别 ID |
+| `cam.yolo_detect.max_score` | `number` | 待确认 | 当前最高置信度分数 |
+| `cam.yolo_detect.objnum` | `int` | `>= 0` | 当前检测到的目标数量 |
+| `cam.face_detect.face_num` | `int` | `>= 0` | 当前检测到的人脸数量 |
+| `cam.fcr.id` | `int` | 依已录入人脸库而定 | 当前识别到的人脸 ID |
+| `cam.fcr.max_score` | `number` | 待确认 | 当前人脸识别匹配分数 |
+| `cam.qrcode.info` | `str` | 非空时表示识别到内容 | 当前二维码内容 |
+| `cam.track.x` | `number` | 依画面分辨率而定 | 跟踪目标的 X 坐标 |
+| `cam.track.y` | `number` | 依画面分辨率而定 | 跟踪目标的 Y 坐标 |
+| `cam.track.cx` | `number` | 依画面分辨率而定 | 跟踪目标中心点 X 坐标 |
+| `cam.track.cy` | `number` | 依画面分辨率而定 | 跟踪目标中心点 Y 坐标 |
 
 > 两者均需外接对应的 AI 摄像头硬件模块，通过 UART 串口通信。
-> 当前文件优先覆盖高频模式和常见结果字段；如果任务要用更冷门模式，不要臆测接口。
+> 上表只整理高频结果字段的使用级类型与已确认约束；如果任务要用更冷门模式，不要臆测接口。

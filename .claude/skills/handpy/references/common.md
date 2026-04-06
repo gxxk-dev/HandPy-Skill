@@ -99,7 +99,7 @@ from mpython import wifi
 wifi.connectWiFi('SSID', 'password')    # 连接，默认超时 10s
 wifi.disconnectWiFi()
 
-# v3 额外支持 AP 模式
+# v2/v3 都支持 AP 模式
 wifi.enable_APWiFi('MyAP', password='12345678', channel=10)
 wifi.disable_APWiFi()
 ```
@@ -178,6 +178,7 @@ sound.read()    # 返回 0~4095，值越大声音越响
 | async/await | ✅ | ✅ |
 
 v2 请用 `'Hello %s' % name` 或 `.format()` 替代 f-string。
+这里只用于兼容性说明；不要把单独出现的 `f-string` / `.format()` 用法当作版本信号。
 
 ---
 

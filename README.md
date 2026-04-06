@@ -69,19 +69,15 @@ HandPy-Skill/
 └── pyproject.toml
 ```
 
-## 版本差异速查
+## 文档约定
 
-| 功能 | v2 (ESP32) | v3 (ESP32-S3) |
-|------|-----------|--------------|
-| MicroPython | 1.12.0 | 1.24.1 |
-| 可用 RAM | 约 120KB | 内部 64KB + PSRAM 8MB+ |
-| 显示屏 | SSD1106 OLED 128×64 | LCD 320×172（LVGL 9.3） |
-| 环境传感器 | BME280（温湿压） | LTR-308ALS（光照） |
-| 音频 | 蜂鸣器 + MP3 软解码 | ES8388 编解码器 + 双麦克风 |
-| Flash | 4MB | 16MB |
-| f-string | ❌ | ✅ |
-
-完整差异见 [`.claude/skills/handpy/references/v2.md`](.claude/skills/handpy/references/v2.md) 和 [`.claude/skills/handpy/references/v3.md`](.claude/skills/handpy/references/v3.md)。
+- 不对普通说明项统一添加类型注解。像导航、版本判断、经验规则、能力列表这类内容，保持自然语言即可。
+- 只有在文档实际描述稳定的对象结构、返回字段、配置项、参数表时，才补充类型信息。
+- 需要类型时，优先使用 `字段 | 类型 | 说明` 这类轻量表格，不引入额外 schema 术语。
+- 类型只写已确认且会影响使用/生成代码的部分；不确定时，写示例或直接标注“待确认”，不要臆测。
+- 对数值字段，优先补充取值范围、单位或约束；范围未知时明确写“待确认”或“依模型/分辨率而定”。
+- 除类型外，更优先写清 `必填/可选`、取值范围、默认值、版本适用范围。
+- 版本差异和兼容性差异不等于版本信号；版本判断以 [`.claude/skills/handpy/SKILL.md`](.claude/skills/handpy/SKILL.md) 中的约定为准。
 
 ## License
 

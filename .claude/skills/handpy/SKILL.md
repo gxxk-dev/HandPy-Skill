@@ -10,8 +10,8 @@ description: Use for HandPy / mPython / 掌控板 coding and board-control tasks
 ## 读取顺序
 
 - 先读 [references/common.md](references/common.md)，获取通用 API、Python 兼容性和模块索引。
-- 当任务明确是 `v2`，或涉及 OLED、BME280、ESP32 老版本限制时，再读 [references/v2.md](references/v2.md)。
-- 当任务明确是 `v3`，或涉及 LCD、LVGL、ES8388、ESP32-S3 时，再读 [references/v3.md](references/v3.md)。
+- 当任务明确是 `v2`，或涉及板载 `oled` / `oled.DispChar()` / 单色 OLED 屏时，再读 [references/v2.md](references/v2.md)。
+- 当任务明确是 `v3`，或涉及 LCD、彩色屏幕、LVGL、`lv_gui.py`、`lv_displayer`、ESP32-S3 时，再读 [references/v3.md](references/v3.md)。
 - 只有在任务需要主机侧与板子交互时，才读 [references/tool.md](references/tool.md)，例如执行代码、传文件、读屏、模拟按键/触摸、刷固件。
 
 ## 版本判断
@@ -19,8 +19,9 @@ description: Use for HandPy / mPython / 掌控板 coding and board-control tasks
 - 若请求没有说明板型，但答案会因版本而变，先询问用户是 `v2` 还是 `v3`。
 - 若请求已明显指向某版本，则直接按该版本回答，不要机械追问。
 - 常见信号：
-  - OLED、BME280、`MicroPython 1.12`、无 `f-string`，通常是 `v2`
-  - LCD、LVGL、ESP32-S3、ES8388、光照传感器，通常是 `v3`
+  - 板载 `oled`、`oled.DispChar()`、`oled.bitmap()`、单色 OLED 屏，通常是 `v2`
+  - LCD、彩色屏幕、LVGL、`lv_gui.py`、`lv_displayer`、ESP32-S3，通常是 `v3`
+  - `WiFi` / AP 模式、BLE、光照/声音/加速度计/磁力计、`smartcamera_k230.py` / `smartcamera_new.py` 不能单独作为版本信号
 
 ## 模块 references
 
