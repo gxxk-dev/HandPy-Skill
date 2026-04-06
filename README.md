@@ -26,6 +26,25 @@ Anthropic / Claude Code skill for HandPy（mPython / 掌控板）boards, with an
 - 预置模块：SIoT、超声波、红外、AI 摄像头、舵机、扩展板、BLE、讯飞语音
 - 可选真机控制：执行代码、传文件、读屏、模拟输入、刷固件
 
+## 外部库引用
+
+本项目文档中提到了以下外部第三方库作为**可选的性能优化方案**：
+
+| 库 | 用途 | 来源 | 适用版本 |
+|----|------|------|---------|
+| **micropython-ssd1106_dpr** | OLED 差分页刷新 | https://github.com/emofalling/micropython-ssd1106_dpr | v2 |
+| **devlib** | 优化版 mpython.py，native 编译加速、I2C 超频 | https://github.com/emofalling/devlib | v2 |
+
+**重要说明：**
+- 这些库**不是必需的**，默认使用标准 HandPy API 即可
+- 只有在用户明确要求"极致性能优化"时才推荐使用
+- 使用前会主动询问用户是否接受引入外部依赖
+- 详细说明见 [`.claude/skills/handpy/references/patterns.md`](.claude/skills/handpy/references/patterns.md) 和 [`.claude/skills/handpy/references/v2.md`](.claude/skills/handpy/references/v2.md)
+
+**安装建议：**
+- 将 .py 编译为 .mpy 后再刷入板子（减少编译内存占用）
+- 放入板子的 `/lib` 目录
+
 ## 在 Claude Code 中使用
 
 如果直接在本仓库里使用 Claude Code，项目级 skill 会从 `.claude/skills/handpy/` 自动生效。

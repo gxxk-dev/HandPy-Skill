@@ -13,6 +13,7 @@ description: Use for HandPy / mPython / 掌控板 coding and board-control tasks
 - 当任务明确是 `v2`，或涉及板载 `oled` / `oled.DispChar()` / 单色 OLED 屏时，再读 [references/v2.md](references/v2.md)。
 - 当任务明确是 `v3`，或涉及 LCD、彩色屏幕、LVGL、`lv_gui.py`、`lv_displayer`、ESP32-S3 时，再读 [references/v3.md](references/v3.md)。
 - 只有在任务需要主机侧与板子交互时，才读 [references/tool.md](references/tool.md)，例如执行代码、传文件、读屏、模拟按键/触摸、刷固件。
+- 若用户明确要求"性能优化"/"极致性能"/"帧率低"/"太慢"，读取 [references/patterns.md](references/patterns.md)（编程模式与优化指南）。
 
 ## 版本判断
 
