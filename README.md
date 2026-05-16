@@ -8,14 +8,14 @@ Anthropic / Claude Code skill for HandPy（mPython / 掌控板）boards, with an
 
 ## Skill 入口
 
-项目内的 Claude Code skill 位于：
+项目内的 skill 位于顶层 `skills/` 目录：
 
-- [`.claude/skills/handpy/SKILL.md`](.claude/skills/handpy/SKILL.md)
-- [`.claude/skills/handpy/references/common.md`](.claude/skills/handpy/references/common.md)
-- [`.claude/skills/handpy/references/v2.md`](.claude/skills/handpy/references/v2.md)
-- [`.claude/skills/handpy/references/v3.md`](.claude/skills/handpy/references/v3.md)
-- [`.claude/skills/handpy/references/tool.md`](.claude/skills/handpy/references/tool.md)
-- [`.claude/skills/handpy/references/modules/`](.claude/skills/handpy/references/modules)
+- [`skills/handpy/SKILL.md`](skills/handpy/SKILL.md)
+- [`skills/handpy/references/common.md`](skills/handpy/references/common.md)
+- [`skills/handpy/references/v2.md`](skills/handpy/references/v2.md)
+- [`skills/handpy/references/v3.md`](skills/handpy/references/v3.md)
+- [`skills/handpy/references/tool.md`](skills/handpy/references/tool.md)
+- [`skills/handpy/references/modules/`](skills/handpy/references/modules)
 
 `SKILL.md` 只负责触发和导航，详细知识按需从 `references/` 加载。
 
@@ -39,17 +39,17 @@ Anthropic / Claude Code skill for HandPy（mPython / 掌控板）boards, with an
 - 这些库**不是必需的**，默认使用标准 HandPy API 即可
 - 只有在用户明确要求"极致性能优化"时才推荐使用
 - 使用前会主动询问用户是否接受引入外部依赖
-- 详细说明见 [`.claude/skills/handpy/references/patterns.md`](.claude/skills/handpy/references/patterns.md) 和 [`.claude/skills/handpy/references/v2.md`](.claude/skills/handpy/references/v2.md)
+- 详细说明见 [`skills/handpy/references/patterns.md`](skills/handpy/references/patterns.md) 和 [`skills/handpy/references/v2.md`](skills/handpy/references/v2.md)
 
 **安装建议：**
 - 将 .py 编译为 .mpy 后再刷入板子（减少编译内存占用）
 - 放入板子的 `/lib` 目录
 
-## 在 Claude Code 中使用
+## 使用方法
 
-如果直接在本仓库里使用 Claude Code，项目级 skill 会从 `.claude/skills/handpy/` 自动生效。
+将 `skills/handpy/` 目录放入你的 AI 编程助手的 skills 目录即可。
 
-如果要全局复用，可将 `.claude/skills/handpy/` 复制或软链接到 `~/.claude/skills/handpy/`。
+以 Claude Code 为例，将其复制或软链接到 `~/.claude/skills/handpy/`。
 
 ## 可选工具
 
@@ -64,31 +64,17 @@ Anthropic / Claude Code skill for HandPy（mPython / 掌控板）boards, with an
 pip install -e .
 ```
 
-安装后可使用 `handpy-tool` 命令；也可以直接运行 `handpy_tool.py`。
+如果使用 `uv` 管理环境，也可以直接安装：
 
-详细命令见 [`.claude/skills/handpy/references/tool.md`](.claude/skills/handpy/references/tool.md)。
-
-## 项目结构
-
-```text
-HandPy-Skill/
-├── .claude/
-│   └── skills/
-│       └── handpy/
-│           ├── SKILL.md
-│           └── references/
-│               ├── common.md
-│               ├── v2.md
-│               ├── v3.md
-│               ├── tool.md
-│               └── modules/
-├── handpy_tool.py
-├── board/
-│   └── handpy_server.py
-└── pyproject.toml
+```bash
+uv pip install -e .
 ```
 
-## 文档约定
+安装后可使用 `handpy-tool` 命令；也可以直接运行 `handpy_tool.py`。
+
+详细命令见 [`skills/handpy/references/tool.md`](skills/handpy/references/tool.md)。
+
+## 文档约定 (for Contributor)
 
 - 不对普通说明项统一添加类型注解。像导航、版本判断、经验规则、能力列表这类内容，保持自然语言即可。
 - 只有在文档实际描述稳定的对象结构、返回字段、配置项、参数表时，才补充类型信息。
@@ -96,8 +82,8 @@ HandPy-Skill/
 - 类型只写已确认且会影响使用/生成代码的部分；不确定时，写示例或直接标注“待确认”，不要臆测。
 - 对数值字段，优先补充取值范围、单位或约束；范围未知时明确写“待确认”或“依模型/分辨率而定”。
 - 除类型外，更优先写清 `必填/可选`、取值范围、默认值、版本适用范围。
-- 版本差异和兼容性差异不等于版本信号；版本判断以 [`.claude/skills/handpy/SKILL.md`](.claude/skills/handpy/SKILL.md) 中的约定为准。
+- 版本差异和兼容性差异不等于版本信号；版本判断以 [`skills/handpy/SKILL.md`](skills/handpy/SKILL.md) 中的约定为准。
 
 ## License
 
-MIT
+AGPL-3.0-or-later
