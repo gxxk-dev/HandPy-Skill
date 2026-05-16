@@ -324,19 +324,47 @@ def tick():
             import lv_displayer
             import lvgl as lv
 
+            def _get(o, names):
+                for name in names:
+                    try:
+                        return getattr(o, name)()
+                    except AttributeError:
+                        pass
+                return None
+
+            def _child_count(o):
+                for name in ('get_child_count', 'get_child_cnt'):
+                    try:
+                        return getattr(o, name)()
+                    except AttributeError:
+                        pass
+                return 0
+
             def _dump(o):
+                if o is None:
+                    return {'type': 'None'}
                 r = {
-                    'type': str(type(o)),
-                    'x': o.get_x(),
-                    'y': o.get_y(),
-                    'w': o.get_width(),
-                    'h': o.get_height()
+                    'type': str(type(o))
                 }
+                for key, names in (
+                    ('x', ('get_x',)),
+                    ('y', ('get_y',)),
+                    ('w', ('get_width',)),
+                    ('h', ('get_height',)),
+                ):
+                    value = _get(o, names)
+                    if value is not None:
+                        r[key] = value
                 try:
                     r['text'] = o.get_text()
                 except:
                     pass
-                ch = [_dump(o.get_child(i)) for i in range(o.get_child_cnt())]
+                ch = []
+                for i in range(_child_count(o)):
+                    try:
+                        ch.append(_dump(o.get_child(i)))
+                    except Exception as e:
+                        ch.append({'error': str(e)})
                 if ch:
                     r['children'] = ch
                 return r

@@ -6,6 +6,7 @@ requires-python = ">=3.9"
 dependencies = [
     "mpremote>=1.0",
     "esptool>=4.0",
+    "pyserial>=3.5",
 ]
 
 [build-system]
@@ -14,3 +15,7 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 handpy-tool = "handpy_tool:main"
+
+[tool.setuptools]
+py-modules = ["handpy_tool"]
+packages = ["board"]

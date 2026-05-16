@@ -19,14 +19,66 @@ ESP32S3 = 'esp32s3'
 
 # ── port detection ────────────────────────────────────────────────────────────
 
+BAD_PORT_HINTS = (
+    'bluetooth',
+    'incoming-port',
+)
+
+
+def _port_score(port):
+    device = port.device or ''
+    device_l = device.lower()
+    desc = (port.description or '').lower()
+    hwid = (port.hwid or '').lower()
+    text = ' '.join((device_l, desc, hwid))
+
+    if any(x in text for x in BAD_PORT_HINTS):
+        return -1000
+
+    s = 0
+    if (
+        '/ttyacm' in device_l
+        or '/ttyusb' in device_l
+        or '/dev/cu.usb' in device_l
+    ):
+        s += 100
+    if device_l.startswith('com'):
+        s += 10
+    # On macOS both /dev/tty.usb* and /dev/cu.usb* may exist; use callout ports.
+    if '/dev/tty.usb' in device_l:
+        s -= 20
+    if any(x in desc for x in (
+        'cp210', 'ch340', 'ch910', 'ftdi', 'usb serial',
+        'usb single serial', 'usb jtag/serial', 'jtag/serial',
+        'cdc', 'acm',
+    )):
+        s += 50
+    if any(x in hwid for x in ('vid:pid=1a86', 'vid:pid=10c4', 'vid:pid=0403', 'vid:pid=303a')):
+        s += 30
+    # Linux exposes many built-in ttyS ports; they are almost never USB boards.
+    if device.startswith('/dev/ttyS'):
+        s -= 100
+    return s
+
+
+def _select_port(ports):
+    candidates = sorted(ports, key=lambda p: (-_port_score(p), p.device or ''))
+    if _port_score(candidates[0]) > 0:
+        return candidates[0].device
+    for p in ports:
+        if _port_score(p) > -1000 and not (p.device or '').startswith('/dev/ttyS'):
+            return p.device
+    return None
+
+
 def find_port():
     import serial.tools.list_ports
     ports = list(serial.tools.list_ports.comports())
-    for p in ports:
-        if any(x in (p.description or '') for x in ('CP210', 'CH340', 'FTDI', 'USB Serial')):
-            return p.device
-    if ports:
-        return ports[0].device
+    if not ports:
+        raise RuntimeError("No serial port found. Use --port to specify.")
+    selected = _select_port(ports)
+    if selected:
+        return selected
     raise RuntimeError("No serial port found. Use --port to specify.")
 
 
@@ -41,7 +93,10 @@ def run(args, port, capture=True):
     if capture:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
-            print(r.stderr, file=sys.stderr)
+            if r.stdout:
+                print(r.stdout, file=sys.stderr, end='' if r.stdout.endswith('\n') else '\n')
+            if r.stderr:
+                print(r.stderr, file=sys.stderr, end='' if r.stderr.endswith('\n') else '\n')
             sys.exit(r.returncode)
         return r.stdout
     else:
@@ -66,15 +121,15 @@ def detect_board(port=None, host=None, transport='serial'):
         try:
             result = _wifi_cmd(host, 0x01, detect_code.encode('utf-8'))
             uname_str = result.decode('utf-8').strip()
-        except:
-            return (V2, ESP32)
+        except Exception as e:
+            raise RuntimeError(f"Failed to detect board over WiFi: {e}") from e
     else:
         if port is None:
             port = find_port()
         try:
             uname_str = run(['exec', detect_code], port).strip()
-        except:
-            return (V2, ESP32)
+        except Exception as e:
+            raise RuntimeError(f"Failed to detect board over serial: {e}") from e
 
     # 检查是否包含 ESP32S3
     if 'ESP32S3' in uname_str:
@@ -198,7 +253,7 @@ def cmd_ls(args):
     else:
         port = args.port or find_port()
         path = args.path or '/'
-        out = run(['exec', f'import os; [print(f) for f in os.listdir("{path}")]'], port)
+        out = run(['exec', f'import os; [print(f) for f in os.listdir({path!r})]'], port)
         print(out, end='')
 
 
@@ -220,6 +275,11 @@ def cmd_flash(args):
 def cmd_screen(args):
     # 自动检测版本（如果未指定）
     version = args.version
+    if not version and not (hasattr(args, 'transport') and args.transport == 'wifi'):
+        port = args.port or find_port()
+        _screen_auto_serial(port, args)
+        return
+
     if not version:
         version, _ = detect_board(
             args.port,
@@ -233,24 +293,12 @@ def cmd_screen(args):
         data = _wifi_cmd(args.host, 0x05, bytes([version_byte]))
         if version == V2:
             # v2: base64 解码 + ASCII art
-            raw = base64.b64decode(data)
-            rows = []
-            for page in range(8):
-                for bit in range(8):
-                    row = ''
-                    for col in range(128):
-                        byte = raw[page * 128 + col]
-                        row += '#' if (byte >> bit) & 1 else ' '
-                    rows.append(row)
-            result = '\n'.join(rows)
+            result = _screen_v2_ascii_from_b64(data)
         else:
             # v3: JSON pretty print
             result = json.dumps(json.loads(data.decode('utf-8')), indent=2, ensure_ascii=False)
 
-        if args.out:
-            Path(args.out).write_text(result)
-        else:
-            print(result)
+        _write_screen_result(result, args)
     else:
         port = args.port or find_port()
         if version == V2:
@@ -259,13 +307,7 @@ def cmd_screen(args):
             _screen_v3(port, args)
 
 
-def _screen_v2(port, args):
-    code = (
-        'import sys, ubinascii\n'
-        'from mpython import oled\n'
-        'sys.stdout.write(ubinascii.b2a_base64(bytes(oled.buffer)).decode())\n'
-    )
-    b64 = run(['exec', code], port).strip()
+def _screen_v2_ascii_from_b64(b64):
     raw = base64.b64decode(b64)
     rows = []
     for page in range(8):
@@ -275,24 +317,108 @@ def _screen_v2(port, args):
                 byte = raw[page * 128 + col]
                 row += '#' if (byte >> bit) & 1 else ' '
             rows.append(row)
-    result = '\n'.join(rows)
+    return '\n'.join(rows)
+
+
+def _write_screen_result(result, args):
     if args.out:
         Path(args.out).write_text(result)
     else:
         print(result)
 
 
+def _screen_auto_serial(port, args):
+    code = (
+        'import os, sys\n'
+        'u=str(os.uname())\n'
+        'if "ESP32S3" in u:\n'
+        '    print("__HANDPY_VERSION__:v3")\n'
+        '    import lv_displayer, lvgl as lv, json\n'
+        '    def _get(o, names):\n'
+        '        for n in names:\n'
+        '            try: return getattr(o, n)()\n'
+        '            except AttributeError: pass\n'
+        '        return None\n'
+        '    def _child_count(o):\n'
+        '        for n in ("get_child_count", "get_child_cnt"):\n'
+        '            try: return getattr(o, n)()\n'
+        '            except AttributeError: pass\n'
+        '        return 0\n'
+        '    def _d(o):\n'
+        '        if o is None: return {"type":"None"}\n'
+        '        r={"type":str(type(o))}\n'
+        '        for k, names in (("x",("get_x",)),("y",("get_y",)),("w",("get_width",)),("h",("get_height",))):\n'
+        '            v=_get(o, names)\n'
+        '            if v is not None: r[k]=v\n'
+        '        try: r["text"]=o.get_text()\n'
+        '        except: pass\n'
+        '        ch=[]\n'
+        '        for i in range(_child_count(o)):\n'
+        '            try: ch.append(_d(o.get_child(i)))\n'
+        '            except Exception as e: ch.append({"error":str(e)})\n'
+        '        if ch: r["children"]=ch\n'
+        '        return r\n'
+        '    sys.stdout.write(json.dumps(_d(lv.screen_active())))\n'
+        'else:\n'
+        '    print("__HANDPY_VERSION__:v2")\n'
+        '    import ubinascii\n'
+        '    from mpython import oled\n'
+        '    sys.stdout.write(ubinascii.b2a_base64(bytes(oled.buffer)).decode())\n'
+    )
+    out = run(['exec', code], port).strip()
+    lines = out.splitlines()
+    if not lines or not lines[0].startswith('__HANDPY_VERSION__:'):
+        raise RuntimeError("Failed to parse screen response")
+    version = lines[0].split(':', 1)[1]
+    payload = '\n'.join(lines[1:]).strip()
+    print(f"Auto-detected: {version}")
+    if version == V2:
+        result = _screen_v2_ascii_from_b64(payload)
+    else:
+        result = json.dumps(json.loads(payload), indent=2, ensure_ascii=False)
+    _write_screen_result(result, args)
+
+
+def _screen_v2(port, args):
+    code = (
+        'import sys, ubinascii\n'
+        'from mpython import oled\n'
+        'sys.stdout.write(ubinascii.b2a_base64(bytes(oled.buffer)).decode())\n'
+    )
+    b64 = run(['exec', code], port).strip()
+    result = _screen_v2_ascii_from_b64(b64)
+    _write_screen_result(result, args)
+
+
 def _screen_v3(port, args):
     code = (
         'import lv_displayer, lvgl as lv, sys, json\n'
+        'def _get(o, names):\n'
+        '    for n in names:\n'
+        '        try: return getattr(o, n)()\n'
+        '        except AttributeError: pass\n'
+        '    return None\n'
+        'def _child_count(o):\n'
+        '    for n in ("get_child_count", "get_child_cnt"):\n'
+        '        try: return getattr(o, n)()\n'
+        '        except AttributeError: pass\n'
+        '    return 0\n'
         'def _d(o):\n'
-        '    r={"type":str(type(o)),"x":o.get_x(),"y":o.get_y(),"w":o.get_width(),"h":o.get_height()}\n'
+        '    if o is None: return {"type":"None"}\n'
+        '    r={"type":str(type(o))}\n'
+        '    for k, names in (("x",("get_x",)),("y",("get_y",)),("w",("get_width",)),("h",("get_height",))):\n'
+        '        v=_get(o, names)\n'
+        '        if v is not None: r[k]=v\n'
         '    try: r["text"]=o.get_text()\n'
         '    except: pass\n'
-        '    ch=[_d(o.get_child(i)) for i in range(o.get_child_cnt())]\n'
+        '    ch=[]\n'
+        '    for i in range(_child_count(o)):\n'
+        '        try: ch.append(_d(o.get_child(i)))\n'
+        '        except Exception as e: ch.append({"error":str(e)})\n'
         '    if ch: r["children"]=ch\n'
         '    return r\n'
-        'sys.stdout.write(json.dumps(_d(lv.screen_active())))\n'
+        'root=lv.screen_active()\n'
+        'sys.stdout.write(json.dumps(_d(root)))\n'
     )
     out = run(['exec', code], port).strip()
     if args.out:
@@ -530,7 +656,11 @@ def build_parser():
     p.add_argument('--baud', type=int, default=115200)
     sub = p.add_subparsers(dest='cmd', required=True)
 
-    r = sub.add_parser('run', help='Run code on board')
+    serial_parent = argparse.ArgumentParser(add_help=False)
+    serial_parent.add_argument('--port', default=argparse.SUPPRESS, help='Serial port (auto-detect if omitted)')
+    serial_parent.add_argument('--baud', type=int, default=argparse.SUPPRESS)
+
+    r = sub.add_parser('run', parents=[serial_parent], help='Run code on board')
     g = r.add_mutually_exclusive_group(required=True)
     g.add_argument('--code', help='Python code string')
     g.add_argument('--file', help='Local .py file to run')
@@ -538,38 +668,38 @@ def build_parser():
     r.add_argument('--host', help='Board IP (wifi transport)')
     r.set_defaults(func=cmd_run)
 
-    pt = sub.add_parser('put', help='Upload file to board')
+    pt = sub.add_parser('put', parents=[serial_parent], help='Upload file to board')
     pt.add_argument('local')
     pt.add_argument('remote')
     pt.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     pt.add_argument('--host', help='Board IP (wifi transport)')
     pt.set_defaults(func=cmd_put)
 
-    gt = sub.add_parser('get', help='Download file from board')
+    gt = sub.add_parser('get', parents=[serial_parent], help='Download file from board')
     gt.add_argument('remote')
     gt.add_argument('local')
     gt.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     gt.add_argument('--host', help='Board IP (wifi transport)')
     gt.set_defaults(func=cmd_get)
 
-    ls = sub.add_parser('ls', help='List files on board')
+    ls = sub.add_parser('ls', parents=[serial_parent], help='List files on board')
     ls.add_argument('--path', default='/')
     ls.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     ls.add_argument('--host', help='Board IP (wifi transport)')
     ls.set_defaults(func=cmd_ls)
 
-    fl = sub.add_parser('flash', help='Flash firmware')
+    fl = sub.add_parser('flash', parents=[serial_parent], help='Flash firmware')
     fl.add_argument('--firmware', required=True)
     fl.add_argument('--chip', choices=['esp32', 'esp32s3'], help='Chip type (auto-detect if omitted)')
     fl.set_defaults(func=cmd_flash)
 
-    inst = sub.add_parser('install', help='Deploy handpy_server to board')
+    inst = sub.add_parser('install', parents=[serial_parent], help='Deploy handpy_server to board')
     inst.set_defaults(func=cmd_install)
 
-    uninst = sub.add_parser('uninstall', help='Remove handpy_server from board')
+    uninst = sub.add_parser('uninstall', parents=[serial_parent], help='Remove handpy_server from board')
     uninst.set_defaults(func=cmd_uninstall)
 
-    wifi = sub.add_parser('wifi', help='Manage WiFi credentials')
+    wifi = sub.add_parser('wifi', parents=[serial_parent], help='Manage WiFi credentials')
     wifi_sub = wifi.add_subparsers(dest='action', required=True)
 
     wifi_add = wifi_sub.add_parser('add', help='Add WiFi credentials')
@@ -583,14 +713,14 @@ def build_parser():
 
     wifi.set_defaults(func=cmd_wifi)
 
-    sc = sub.add_parser('screen', help='Read screen content')
+    sc = sub.add_parser('screen', parents=[serial_parent], help='Read screen content')
     sc.add_argument('--version', choices=['v2', 'v3'], help='Board version (auto-detect if omitted)')
     sc.add_argument('--out', help='Output file (default: stdout)')
     sc.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     sc.add_argument('--host', help='Board IP (wifi transport)')
     sc.set_defaults(func=cmd_screen)
 
-    pr = sub.add_parser('press', help='Simulate button/touch input')
+    pr = sub.add_parser('press', parents=[serial_parent], help='Simulate button/touch input')
     g2 = pr.add_mutually_exclusive_group(required=True)
     g2.add_argument('--button', choices=['A', 'B'])
     g2.add_argument('--touch', choices=['P', 'Y', 'T', 'H', 'O', 'N'])
@@ -604,7 +734,10 @@ def build_parser():
 
 def main():
     try:
-        args = build_parser().parse_args()
+        parser = build_parser()
+        args = parser.parse_args()
+        if getattr(args, 'transport', None) == 'wifi' and not getattr(args, 'host', None):
+            parser.error("--host is required when --transport wifi")
         args.func(args)
     except RuntimeError as e:
         # WiFi 命令错误（板端返回的错误信息）
