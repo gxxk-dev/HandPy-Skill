@@ -2,11 +2,14 @@
 """HandPy (mPython) board control tool."""
 
 import argparse
-import subprocess
 import sys
 import base64
 import json
 from pathlib import Path
+from contextlib import contextmanager
+
+from mpremote.transport_serial import SerialTransport
+from mpremote.commands import CommandError
 
 
 # ── board constants ───────────────────────────────────────────────────────────
@@ -84,23 +87,80 @@ def find_port():
 
 # ── mpremote helpers ──────────────────────────────────────────────────────────
 
-def mpremote_cmd(args, port):
-    return ['mpremote', 'connect', port] + args
+@contextmanager
+def _transport(port, soft_reset=True):
+    t = SerialTransport(port, baudrate=115200)
+    try:
+        t.enter_raw_repl(soft_reset=soft_reset)
+        yield t
+    finally:
+        try:
+            if t.in_raw_repl:
+                t.exit_raw_repl()
+        except Exception:
+            pass
+        t.close()
+
+
+def _write_stdout_data(data):
+    if not data:
+        return
+    if isinstance(data, str):
+        data = data.encode('utf-8', errors='replace')
+    sys.stdout.buffer.write(data)
+
+
+def _print_stderr_data(data):
+    if not data:
+        return
+    if isinstance(data, bytes):
+        data = data.decode('utf-8', errors='replace')
+    else:
+        data = str(data)
+    print(data, file=sys.stderr, end='' if data.endswith('\n') else '\n')
 
 
 def run(args, port, capture=True):
-    cmd = mpremote_cmd(args, port)
-    if capture:
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            if r.stdout:
-                print(r.stdout, file=sys.stderr, end='' if r.stdout.endswith('\n') else '\n')
-            if r.stderr:
-                print(r.stderr, file=sys.stderr, end='' if r.stderr.endswith('\n') else '\n')
-            sys.exit(r.returncode)
-        return r.stdout
-    else:
-        subprocess.run(cmd, check=True)
+    from mpremote.transport import TransportExecError
+
+    # strip leading 'resume' (means no soft reset)
+    soft_reset = True
+    while args and args[0] == 'resume':
+        args = args[1:]
+        soft_reset = False
+
+    op = args[0]
+    try:
+        if op == 'exec':
+            with _transport(port, soft_reset) as t:
+                out = t.exec(args[1])
+            if capture:
+                return out.decode('utf-8')
+            sys.stdout.buffer.write(out)
+        elif op == 'run':
+            with _transport(port, soft_reset) as t:
+                out = t.execfile(args[1])
+            if capture:
+                return out.decode('utf-8')
+            sys.stdout.buffer.write(out)
+        elif op == 'cp':
+            src, dst = args[1], args[2]
+            with _transport(port, soft_reset) as t:
+                if dst.startswith(':'):
+                    data = Path(src).read_bytes()
+                    t.fs_writefile(dst[1:], data)
+                else:
+                    data = t.fs_readfile(src[1:])
+                    Path(dst).write_bytes(data)
+        elif op == 'rm':
+            with _transport(port, soft_reset) as t:
+                t.fs_rmfile(args[1].lstrip(':'))
+        else:
+            raise ValueError(f"Unsupported mpremote op: {op}")
+    except TransportExecError as e:
+        _write_stdout_data(e.args[0] if len(e.args) > 0 else b'')
+        _print_stderr_data(e.args[1] if len(e.args) > 1 else '')
+        sys.exit(1)
 
 
 # ── board detection ───────────────────────────────────────────────────────────
@@ -258,18 +318,16 @@ def cmd_ls(args):
 
 
 def cmd_flash(args):
+    import esptool
     port = args.port or find_port()
-    # 自动检测芯片型号（如果未指定）
     chip = args.chip or detect_board(port)[1]
-
     if not args.chip:
         print(f"Auto-detected chip: {chip}")
 
-    cmd = [
-        'esptool.py', '--chip', chip, '--port', port,
-        '--baud', '460800', 'write_flash', '-z', '0x0', args.firmware
-    ]
-    subprocess.run(cmd, check=True)
+    esp = esptool.detect_chip(port, baud=460800)
+    esp = esp.run_stub()
+    esptool.write_flash(esp, [(0x0, args.firmware)], compress=True)
+    esp.hard_reset()
 
 
 def cmd_screen(args):
@@ -581,56 +639,25 @@ def _write_wifi_creds(boot_content, creds, port):
 
 
 def _read_remote_text(port, remote_path, missing_ok=False):
-    """Read text from a board file using a temporary host file."""
-    import os
-    import tempfile
-
-    tmp = None
+    path = remote_path.lstrip(':')
     try:
-        fd, tmp = tempfile.mkstemp()
-        os.close(fd)
-        proc = subprocess.run(
-            mpremote_cmd(['resume', 'cp', ':' + remote_path.lstrip(':'), tmp], port),
-            capture_output=True,
-            text=True
-        )
-        if proc.returncode == 0:
-            return Path(tmp).read_text(encoding='utf-8')
-        if missing_ok and 'No such file' in (proc.stdout + proc.stderr):
+        with _transport(port, soft_reset=False) as t:
+            return t.fs_readfile(path).decode('utf-8')
+    except OSError as e:
+        if missing_ok:
             return ''
-        if proc.stdout:
-            print(proc.stdout, file=sys.stderr, end='' if proc.stdout.endswith('\n') else '\n')
-        if proc.stderr:
-            print(proc.stderr, file=sys.stderr, end='' if proc.stderr.endswith('\n') else '\n')
-        sys.exit(proc.returncode)
-    finally:
-        if tmp:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+        print(f"Error reading {path}: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _write_remote_text(port, remote_path, content):
-    """Write text to a board file using a temporary host file."""
-    import os
-    import tempfile
-
-    tmp = None
+    path = remote_path.lstrip(':')
     try:
-        with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8') as f:
-            tmp = f.name
-            f.write(content)
-        run(['resume', 'cp', tmp, ':' + remote_path.lstrip(':')], port, capture=False)
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to write {remote_path}", file=sys.stderr)
-        sys.exit(e.returncode)
-    finally:
-        if tmp:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+        with _transport(port, soft_reset=False) as t:
+            t.fs_writefile(path, content.encode('utf-8'))
+    except OSError as e:
+        print(f"Error writing {path}: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 BUTTON_MAP = {'A': 'button_a', 'B': 'button_b'}
