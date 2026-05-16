@@ -194,7 +194,7 @@ def cmd_run(args):
 
             try:
                 # 执行文件（设置 __file__ 和 __name__）
-                code = f"exec(open('{remote_path}').read(), {{'__name__': '__main__', '__file__': '{remote_path}', '__builtins__': __builtins__}})"
+                code = f"__file__ = {remote_path!r}\nexec(open({remote_path!r}).read())"
                 result = _wifi_cmd(args.host, 0x01, code.encode('utf-8'))
 
                 if result and result != b'OK':
@@ -457,11 +457,11 @@ def cmd_install(args):
         sys.exit(1)
 
     print("Uploading handpy_server.py...")
-    run(['cp', str(server_path), ':handpy_server.py'], port, capture=False)
+    run(['resume', 'cp', str(server_path), ':handpy_server.py'], port, capture=False)
 
     # 2. 读取板子 boot.py
     print("Reading boot.py...")
-    boot_content = run(['cp', ':boot.py', '-'], port)
+    boot_content = _read_remote_text(port, 'boot.py', missing_ok=True)
 
     # 3. 检查是否已安装
     if '# HANDPY_SERVER_BEGIN' in boot_content:
@@ -474,15 +474,7 @@ def cmd_install(args):
 
     # 5. 写回 boot.py
     print("Updating boot.py...")
-    proc = subprocess.Popen(
-        mpremote_cmd(['cp', '-', ':boot.py'], port),
-        stdin=subprocess.PIPE,
-        text=True
-    )
-    proc.communicate(new_boot)
-    if proc.returncode != 0:
-        print("Error: Failed to write boot.py", file=sys.stderr)
-        sys.exit(1)
+    _write_remote_text(port, 'boot.py', new_boot)
 
     print("Installation complete. Use 'wifi add' to configure WiFi credentials.")
 
@@ -494,7 +486,7 @@ def cmd_uninstall(args):
 
     # 1. 读取板子 boot.py
     print("Reading boot.py...")
-    boot_content = run(['cp', ':boot.py', '-'], port)
+    boot_content = _read_remote_text(port, 'boot.py')
 
     # 2. 删除标记块
     pattern = r'\n?# HANDPY_SERVER_BEGIN.*?# HANDPY_SERVER_END\n?'
@@ -505,20 +497,12 @@ def cmd_uninstall(args):
     else:
         # 3. 写回 boot.py
         print("Updating boot.py...")
-        proc = subprocess.Popen(
-            mpremote_cmd(['cp', '-', ':boot.py'], port),
-            stdin=subprocess.PIPE,
-            text=True
-        )
-        proc.communicate(new_boot)
-        if proc.returncode != 0:
-            print("Error: Failed to write boot.py", file=sys.stderr)
-            sys.exit(1)
+        _write_remote_text(port, 'boot.py', new_boot)
 
     # 4. 删除 handpy_server.py
     print("Removing handpy_server.py...")
     try:
-        run(['rm', ':handpy_server.py'], port, capture=False)
+        run(['resume', 'rm', ':handpy_server.py'], port, capture=False)
     except:
         print("Warning: Failed to remove handpy_server.py (may not exist)")
 
@@ -533,7 +517,7 @@ def cmd_wifi(args):
     port = args.port or find_port()
 
     # 读取 boot.py
-    boot_content = run(['cp', ':boot.py', '-'], port)
+    boot_content = _read_remote_text(port, 'boot.py')
 
     # 提取 WIFI_CREDS
     match = re.search(r'# HANDPY_SERVER_BEGIN.*?WIFI_CREDS\s*=\s*(\[.*?\]).*?# HANDPY_SERVER_END',
@@ -592,16 +576,61 @@ def _write_wifi_creds(boot_content, creds, port):
     new_boot = re.sub(pattern, new_block, boot_content, flags=re.DOTALL)
 
     # 写回 boot.py
-    proc = subprocess.Popen(
-        mpremote_cmd(['cp', '-', ':boot.py'], port),
-        stdin=subprocess.PIPE,
-        text=True
-    )
-    proc.communicate(new_boot)
-    if proc.returncode != 0:
-        print("Error: Failed to write boot.py", file=sys.stderr)
-        sys.exit(1)
+    _write_remote_text(port, 'boot.py', new_boot)
     print("boot.py updated successfully.")
+
+
+def _read_remote_text(port, remote_path, missing_ok=False):
+    """Read text from a board file using a temporary host file."""
+    import os
+    import tempfile
+
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp()
+        os.close(fd)
+        proc = subprocess.run(
+            mpremote_cmd(['resume', 'cp', ':' + remote_path.lstrip(':'), tmp], port),
+            capture_output=True,
+            text=True
+        )
+        if proc.returncode == 0:
+            return Path(tmp).read_text(encoding='utf-8')
+        if missing_ok and 'No such file' in (proc.stdout + proc.stderr):
+            return ''
+        if proc.stdout:
+            print(proc.stdout, file=sys.stderr, end='' if proc.stdout.endswith('\n') else '\n')
+        if proc.stderr:
+            print(proc.stderr, file=sys.stderr, end='' if proc.stderr.endswith('\n') else '\n')
+        sys.exit(proc.returncode)
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _write_remote_text(port, remote_path, content):
+    """Write text to a board file using a temporary host file."""
+    import os
+    import tempfile
+
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8') as f:
+            tmp = f.name
+            f.write(content)
+        run(['resume', 'cp', tmp, ':' + remote_path.lstrip(':')], port, capture=False)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: Failed to write {remote_path}", file=sys.stderr)
+        sys.exit(e.returncode)
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 BUTTON_MAP = {'A': 'button_a', 'B': 'button_b'}
@@ -702,13 +731,13 @@ def build_parser():
     wifi = sub.add_parser('wifi', parents=[serial_parent], help='Manage WiFi credentials')
     wifi_sub = wifi.add_subparsers(dest='action', required=True)
 
-    wifi_add = wifi_sub.add_parser('add', help='Add WiFi credentials')
+    wifi_add = wifi_sub.add_parser('add', parents=[serial_parent], help='Add WiFi credentials')
     wifi_add.add_argument('--ssid', required=True, help='WiFi SSID')
     wifi_add.add_argument('--pwd', required=True, help='WiFi password')
 
-    wifi_list = wifi_sub.add_parser('list', help='List WiFi credentials')
+    wifi_list = wifi_sub.add_parser('list', parents=[serial_parent], help='List WiFi credentials')
 
-    wifi_remove = wifi_sub.add_parser('remove', help='Remove WiFi credentials')
+    wifi_remove = wifi_sub.add_parser('remove', parents=[serial_parent], help='Remove WiFi credentials')
     wifi_remove.add_argument('--ssid', required=True, help='WiFi SSID')
 
     wifi.set_defaults(func=cmd_wifi)

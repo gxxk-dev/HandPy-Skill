@@ -43,19 +43,24 @@ def _handle_exec(payload):
     """EXEC: 执行代码，捕获 stdout，使用隔离命名空间"""
     code = payload.decode('utf-8')
     try:
-        # 捕获 stdout
-        import io
-        import sys
-        old_stdout = sys.stdout
-        sys.stdout = io.StringIO()
+        output_parts = []
 
-        try:
-            # 使用隔离的命名空间，设置 __name__ 为 '__main__'
-            namespace = {'__name__': '__main__', '__builtins__': __builtins__}
-            exec(code, namespace)
-            output = sys.stdout.getvalue()
-        finally:
-            sys.stdout = old_stdout
+        def _print(*values, **kwargs):
+            sep = kwargs.get('sep', ' ')
+            end = kwargs.get('end', '\n')
+            file = kwargs.get('file', None)
+            text = sep.join([str(v) for v in values]) + end
+            if file is not None:
+                file.write(text)
+            else:
+                output_parts.append(text)
+
+        import builtins
+
+        # 使用隔离的命名空间，设置 __name__ 为 '__main__'
+        namespace = {'__name__': '__main__', '__builtins__': builtins, 'print': _print}
+        exec(code, namespace)
+        output = ''.join(output_parts)
 
         # 返回捕获的输出，如果为空则返回 OK
         return 0, output.encode('utf-8') if output else b'OK'
@@ -239,20 +244,29 @@ def _handle_client(conn, addr):
 def _connect_wifi():
     """连接 WiFi，返回 IP 或 None"""
     import network
-    import re
 
     # 读取 boot.py 中的 WIFI_CREDS，仅解析标记块
     try:
         with open('boot.py', 'r') as f:
             boot_code = f.read()
         # 提取标记块中的 WIFI_CREDS
-        match = re.search(r'# HANDPY_SERVER_BEGIN.*?WIFI_CREDS\s*=\s*(\[.*?\]).*?# HANDPY_SERVER_END',
-                          boot_code, re.DOTALL)
-        if not match:
+        start = boot_code.find('# HANDPY_SERVER_BEGIN')
+        end = boot_code.find('# HANDPY_SERVER_END', start)
+        if start < 0 or end < 0:
             _log('WIFI_CREDS not found in boot.py')
             return None
 
-        creds_str = match.group(1)
+        creds_str = None
+        block = boot_code[start:end]
+        for line in block.split('\n'):
+            line = line.strip()
+            if line.startswith('WIFI_CREDS') and '=' in line:
+                creds_str = line.split('=', 1)[1].strip()
+                break
+        if not creds_str:
+            _log('WIFI_CREDS not found in boot.py')
+            return None
+
         # 安全解析：wifi add 写入的是合法 JSON，直接解析
         try:
             import json
@@ -277,8 +291,8 @@ def _connect_wifi():
 
         wlan.connect(ssid, pwd)
 
-        # 等待连接，最多 10 秒
-        for _ in range(100):
+        # 等待连接，最多 30 秒；v2 固件首次关联可能明显慢于 v3。
+        for _ in range(300):
             if wlan.isconnected():
                 ip = wlan.ifconfig()[0]
                 _log('Connected, IP: %s' % ip)
