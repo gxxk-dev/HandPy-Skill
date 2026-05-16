@@ -89,9 +89,28 @@ def find_port():
 
 @contextmanager
 def _transport(port, soft_reset=True):
+    import time
     t = SerialTransport(port, baudrate=115200)
+    t.use_raw_paste = False  # handpy_server socket data corrupts raw-paste handshake
     try:
+        for _ in range(3):
+            t.serial.write(b"\r\x03")
+            time.sleep(0.1)
+        n = t.serial.inWaiting()
+        while n > 0:
+            t.serial.read(n)
+            time.sleep(0.05)
+            n = t.serial.inWaiting()
         t.enter_raw_repl(soft_reset=soft_reset)
+        if soft_reset:
+            # boot.py restarts handpy_server; wait for it then flush and re-sync
+            time.sleep(2.5)
+            n = t.serial.inWaiting()
+            while n > 0:
+                t.serial.read(n)
+                n = t.serial.inWaiting()
+            t.serial.write(b"\x01")
+            t.read_until(1, b"raw REPL; CTRL-B to exit\r\n")
         yield t
     finally:
         try:
