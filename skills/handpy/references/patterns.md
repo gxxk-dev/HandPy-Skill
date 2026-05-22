@@ -20,6 +20,7 @@
 | "怎么读按键"/"检测触摸" | 轮询（`is_pressed()`），提及事件回调 | - |
 | "响应慢"/"错过按键" | 事件回调（`event_pressed`） | 回调中禁止 `time.sleep()` |
 | "多个按键"/"同时检测" | 事件回调 | 回调中禁止耗时操作 |
+| "启动菜单"/"项目选择器"/"等待用户选择" | 阻塞式等待输入 + 等待松手 | 等待循环要 `sleep_ms(20)`，不要空转 `pass` |
 | 初学者 + 简单任务 | 仅轮询 | - |
 
 **代码模板：**
@@ -36,6 +37,49 @@ def on_press(pin):
     # 快速处理，不阻塞
 button_a.event_pressed = on_press
 ```
+
+### 阻塞式菜单等待输入
+
+适用于 `boot.py` 项目选择器、启动菜单等“必须等用户选择后再继续”的场景。模式是：绘制一次界面 → 等待任意输入 → 处理一次 → 等待松手，避免按住时连续跳多项。
+
+```python
+import time
+
+TOUCH_THRESHOLD = 300  # raw read 阈值需按板子/环境校准
+
+def input_active():
+    return (
+        touchPad_P.read() < TOUCH_THRESHOLD or
+        touchPad_N.read() < TOUCH_THRESHOLD or
+        button_a.value() == 0 or
+        button_b.value() == 0
+    )
+
+def wait_input():
+    while not input_active():
+        time.sleep_ms(20)
+
+def wait_release():
+    while input_active():
+        time.sleep_ms(20)
+
+while True:
+    draw_menu(target)
+    wait_input()
+
+    if touchPad_N.read() < TOUCH_THRESHOLD:
+        target = (target + 1) % len(items)
+    elif touchPad_P.read() < TOUCH_THRESHOLD:
+        target = (target - 1) % len(items)
+    elif button_a.value() == 0:
+        break
+    elif button_b.value() == 0:
+        run_quick_start()
+
+    wait_release()
+```
+
+旧代码里可能看到 `while not (...): pass`。不要照搬：它会让 CPU 满负载空转，也不能阻止按住按键/触摸时重复触发。
 
 ---
 
@@ -203,6 +247,7 @@ data = file.read()  # ❌ 每次新分配
 |--------|---------|------|
 | 回调中 `time.sleep()` | `event_pressed` 函数内有 `sleep` | "回调中禁止阻塞，移到主循环或用异步" |
 | 主循环长时间 sleep | `while True` 内 `sleep(>1)` | "用异步或降低 sleep 时间" |
+| 空转等待输入 | `while not (...): pass` / `while ...: pass` | "加 `time.sleep_ms(20)`；菜单类交互处理后等待松手" |
 | v2 OLED 频繁全屏刷新 | 循环内 `oled.fill()` + `show()` | "只更新变化区域" |
 | v3 LVGL 频繁 `clean()` | 循环内 `scr.clean()` | "只更新变化对象" |
 | v2 使用 f-string | 代码含 `f"..."` | "v2 不支持，改用 '%s' % x" |
