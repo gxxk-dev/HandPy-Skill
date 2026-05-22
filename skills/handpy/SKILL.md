@@ -1,6 +1,6 @@
 ---
 name: handpy
-description: Use for HandPy / mPython / 掌控板 coding and board-control tasks, including v2/v3 APIs, OLED/LCD/LVGL, built-in sensors, bundled modules such as SIoT, HCSR04, servo, parrot, bluebit, smartcamera, BLE, and xunfei, plus the optional `handpy-tool` utility for running code, transferring files, reading the screen, simulating button/touch input, or flashing firmware. 适用于 HandPy v2/v3 开发、调试、模块使用和可选真机控制；不适用于没有 HandPy API 的通用 ESP32 板卡。
+description: Use for HandPy / mPython / 掌控板 coding and board-control tasks, including v2/v3 APIs, OLED/LCD/LVGL display geometry, text/font sizing, built-in sensors, bundled modules such as SIoT, HCSR04, servo, parrot, bluebit, smartcamera, BLE, and xunfei, plus the optional `handpy-tool` utility for running code, transferring files, reading the screen, simulating button/touch input, or flashing firmware. 适用于 HandPy v2/v3 开发、调试、模块使用和可选真机控制；不适用于没有 HandPy API 的通用 ESP32 板卡。
 ---
 
 # HandPy
@@ -10,8 +10,8 @@ description: Use for HandPy / mPython / 掌控板 coding and board-control tasks
 ## 读取顺序
 
 - 先读 [references/common.md](references/common.md)，获取通用 API、Python 兼容性和模块索引。
-- 当任务明确是 `v2`，或涉及板载 `oled` / `oled.DispChar()` / 单色 OLED 屏时，再读 [references/v2.md](references/v2.md)。
-- 当任务明确是 `v3`，或涉及 LCD、彩色屏幕、LVGL、`lv_gui.py`、`lv_displayer`、ESP32-S3 时，再读 [references/v3.md](references/v3.md)。
+- 当任务明确是 `v2`，或涉及板载 `oled` / `oled.DispChar()` / 单色 OLED 屏 / OLED 字体字号 / 一个字多大时，再读 [references/v2.md](references/v2.md)。
+- 当任务明确是 `v3`，或涉及 LCD、彩色屏幕、LVGL、`lv_gui.py`、`lv_displayer`、ESP32-S3、LCD 字体字号、文字尺寸或屏幕坐标时，再读 [references/v3.md](references/v3.md)。
 - 只有在任务需要主机侧与板子交互时，才读 [references/tool.md](references/tool.md)，例如执行代码、传文件、读屏、模拟按键/触摸、刷固件。
 - 若用户明确要求"性能优化"/"极致性能"/"帧率低"/"太慢"，读取 [references/patterns.md](references/patterns.md)（编程模式与优化指南）。
 
