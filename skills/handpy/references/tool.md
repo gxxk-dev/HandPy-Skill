@@ -39,6 +39,8 @@ handpy_tool.py ls --path /
 板子偶尔会因为串口丢字节写出残缺文件，这种情况下复位后程序会起不来，而上传命令本身却"成功"返回。
 需要跳过校验时用 `--no-verify`（例如往 RAM 目标写临时文件时）。
 
+上传和校验在同一个串口会话内完成——mpremote 对设备加 flock 独占锁，分两次开串口第二次必然失败。
+
 ### 运行代码
 
 ```bash
@@ -69,11 +71,23 @@ handpy_tool.py reset
 
 # 轻量复位 + 自定义复位后等待秒数
 handpy_tool.py reset --soft --delay 5
+
+# 复位后立刻抢回串口并保持会话
+handpy_tool.py reset --grab
 ```
 
 `boot.py` / `main.py` 里的自启死循环会独占串口，此时 `run` / `put` / `get` 全部报
 `could not enter raw repl`，且反复尝试 `enter_raw_repl()` 也抢不回来。
 用 `reset` 做一次物理复位，趁启动窗口期抢回控制权；若复位无效，就手动按板子上的 RST 键。
+
+实测时序（v3 / ESP32S3 / CH340）：复位后约 0.9 秒自启脚本开始刷提示符，2.4 秒左右初始化结束。
+抢占通常需要 2～10 次重试才成功，工具默认重试 8 次（`reset --grab` 为 20 次）。
+
+`reset` 默认用简单的 RTS 拉低-释放复位。实测这比 esptool 的 `ClassicReset` /
+`UnixTightReset` 都可靠——后者会多次切换控制线并 sleep，反而错过抢回窗口。
+
+不带 `--grab` 时只复位就返回，串口随后会被自启脚本重新占回去；需要紧接着执行
+`run` / `put` 时请用 `--grab`。
 
 ### 读取屏幕
 
@@ -255,7 +269,19 @@ CMD 枚举：
 - `machine.reset()` 执行后出现 `timeout waiting for first EOF reception`：这是**复位成功的信号**，
   不是错误。板子正在重启，串口随之断开，工具自然等不到结束符。
 - `could not enter raw repl`：板子可能只是**还在启动**。等几秒重试即可；
-  若始终不进，则说明自启脚本正独占串口，用 `handpy-tool reset` 复位。
+  若始终不进，则说明自启脚本正独占串口，用 `handpy-tool reset --grab` 复位并抢回。
+- `could not exec command (response: b'ra')`：`ra` 是 "raw REPL" 的片段，说明串口流未对齐
+  （通常是上一次操作有残留数据）。重试即可。
+
+**上传后程序起不来**：
+`put` 现在会自动校验并报错拦截；若用了 `--no-verify` 需手工核对：
+
+```bash
+handpy_tool.py run --code "import os; print(os.stat('/remote.py')[6])"
+wc -c local.py
+```
+
+两者不一致说明板子上是残缺文件，重新上传。
 
 **上传后程序起不来**：
 先确认 `put` 是否报过校验错误；没有校验过就手动比对：
