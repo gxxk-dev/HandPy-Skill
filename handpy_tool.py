@@ -296,6 +296,19 @@ def cmd_run(args):
             run(['exec', args.code], port, capture=False)
 
 
+def _verify_remote_size_serial(port, remote_path, local_size):
+    """串口回读 os.stat 校验上传大小"""
+    with _transport(port, soft_reset=False) as t:
+        remote_size = t.fs_stat(remote_path).st_size
+    if remote_size != local_size:
+        raise RuntimeError(
+            "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
+            "板子上的文件可能不完整，请重试；仍失败则检查串口线缆或降低波特率。"
+            % (remote_path, local_size, remote_size, local_size - remote_size)
+        )
+    return remote_size
+
+
 def cmd_put(args):
     if hasattr(args, 'transport') and args.transport == 'wifi':
         import struct
@@ -305,10 +318,26 @@ def cmd_put(args):
         content = Path(args.local).read_bytes()
         payload = struct.pack('>H', len(path)) + path + content
         _wifi_cmd(args.host, 0x02, payload)
-        print(f"Uploaded {args.local} -> {remote_path}")
+        if not getattr(args, 'no_verify', False):
+            # 回读文件比对字节数，避免板端静默写残
+            readback = _wifi_cmd(args.host, 0x03, path)
+            if len(readback) != len(content):
+                raise RuntimeError(
+                    "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
+                    "请重试。"
+                    % (remote_path, len(content), len(readback), len(content) - len(readback))
+                )
+        print(f"Uploaded {args.local} -> {remote_path} ({len(content)} bytes verified)")
     else:
         port = args.port or find_port()
         run(['cp', args.local, args.remote], port, capture=False)
+        local_size = Path(args.local).stat().st_size
+        remote_path = args.remote.lstrip(':')
+        if not getattr(args, 'no_verify', False):
+            _verify_remote_size_serial(port, remote_path, local_size)
+            print(f"Uploaded {args.local} -> {remote_path} ({local_size} bytes verified)")
+        else:
+            print(f"Uploaded {args.local} -> {remote_path} (unverified)")
 
 
 def cmd_get(args):
@@ -746,6 +775,8 @@ def build_parser():
     pt = sub.add_parser('put', parents=[serial_parent], help='Upload file to board')
     pt.add_argument('local')
     pt.add_argument('remote')
+    pt.add_argument('--no-verify', action='store_true',
+                     help='Skip post-upload size verification')
     pt.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     pt.add_argument('--host', help='Board IP (wifi transport)')
     pt.set_defaults(func=cmd_put)
