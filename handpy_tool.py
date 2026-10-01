@@ -87,29 +87,79 @@ def find_port():
 
 # ── mpremote helpers ──────────────────────────────────────────────────────────
 
-@contextmanager
-def _transport(port, soft_reset=True):
+def _enter_raw_repl(t, soft_reset, attempts=8):
+    """反复尝试进入 raw REPL。
+
+    自启脚本（boot.py/main.py 里的死循环）会持续刷提示符抢占串口，单次
+    enter_raw_repl() 很难抢赢——实测需要 5～10 次重试。逐次尝试时每次都先
+    Ctrl-C 打断当前程序，再请求进入。
+    """
     import time
     from mpremote.transport import TransportError
 
-    t = SerialTransport(port, baudrate=115200)
+    last = None
+    for i in range(max(1, attempts)):
+        try:
+            for _ in range(3):
+                t.serial.write(b"\r\x03")
+                time.sleep(0.05)
+            n = t.serial.inWaiting()
+            while n > 0:
+                t.serial.read(n)
+                n = t.serial.inWaiting()
+            t.enter_raw_repl(soft_reset=soft_reset, timeout_overall=1.0)
+            # 抢占过程中板子可能还在吐自启脚本的输出，残留字节会让后续 exec
+            # 读到 "raw REPL" 的片段（could not exec command: b'ra'）。
+            # 成功后退回并刷干净，再交还给调用方。
+            try:
+                if t.in_raw_repl:
+                    t.exit_raw_repl()
+            except Exception:
+                pass
+            n = t.serial.inWaiting()
+            while n > 0:
+                t.serial.read(n)
+                time.sleep(0.02)
+                n = t.serial.inWaiting()
+            t.enter_raw_repl(soft_reset=False, timeout_overall=2.0)
+            if i:
+                print(f"Entered raw REPL after {i + 1} attempt(s).", file=sys.stderr)
+            return
+        except TransportError as e:
+            last = e
+            time.sleep(0.1)
+    raise last if last else TransportError("could not enter raw repl")
+
+
+@contextmanager
+def _transport(port, soft_reset=True, grab_attempts=8):
+    import time
+    from mpremote.transport import TransportError
+
+    # RTS 复位会让 USB 重新枚举，设备节点会短暂消失；mpremote 默认 wait=0
+    # 只试一次就报错，所以这里自己重试打开。
+    t = None
+    last = None
+    for _ in range(10):
+        try:
+            t = SerialTransport(port, baudrate=115200, wait=1)
+            break
+        except TransportError as e:
+            last = e
+            time.sleep(0.5)
+    if t is None:
+        raise RuntimeError(
+            "无法打开串口 %s（%s）。确认设备已连接，或板子正在重新枚举。" % (port, last)
+        )
     t.use_raw_paste = False  # handpy_server socket data corrupts raw-paste handshake
     try:
-        for _ in range(3):
-            t.serial.write(b"\r\x03")
-            time.sleep(0.1)
-        n = t.serial.inWaiting()
-        while n > 0:
-            t.serial.read(n)
-            time.sleep(0.05)
-            n = t.serial.inWaiting()
         try:
-            t.enter_raw_repl(soft_reset=soft_reset)
+            _enter_raw_repl(t, soft_reset, grab_attempts)
         except TransportError as e:
             raise RuntimeError(
                 "无法进入 raw REPL（%s）。板子可能仍在启动，或 boot.py/main.py "
                 "里的自启脚本正独占串口：等待几秒重试，或执行 "
-                "'handpy-tool reset' 用 RTS 硬复位抢回串口。" % e
+                "'handpy-tool reset --grab' 复位并抢回串口。" % e
             ) from e
         if soft_reset:
             # boot.py restarts handpy_server; wait for it then flush and re-sync
@@ -390,17 +440,24 @@ def cmd_run(args):
                 timeout=timeout, forward_stdin=forward_stdin)
 
 
-def _verify_remote_size_serial(port, remote_path, local_size):
-    """串口回读 os.stat 校验上传大小"""
-    with _transport(port, soft_reset=False) as t:
-        remote_size = t.fs_stat(remote_path).st_size
-    if remote_size != local_size:
-        raise RuntimeError(
-            "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
-            "板子上的文件可能不完整，请重试；仍失败则检查串口线缆或降低波特率。"
-            % (remote_path, local_size, remote_size, local_size - remote_size)
-        )
-    return remote_size
+def _write_and_verify(port, local_path, remote_path, soft_reset=True, verify=True):
+    """一次串口会话内完成上传与回读校验。
+
+    分两次开串口会失败：mpremote 对设备加 flock 独占锁，同一进程持有会话时
+    第二次打开必然拿不到锁。实测上传和校验必须在同一个 _transport 里。
+    """
+    data = Path(local_path).read_bytes()
+    with _transport(port, soft_reset) as t:
+        t.fs_writefile(remote_path, data)
+        if verify:
+            remote_size = t.fs_stat(remote_path).st_size
+            if remote_size != len(data):
+                raise RuntimeError(
+                    "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
+                    "板子上的文件可能不完整，请重试；仍失败则检查串口线缆或降低波特率。"
+                    % (remote_path, len(data), remote_size, len(data) - remote_size)
+                )
+    return len(data)
 
 
 def cmd_put(args):
@@ -424,12 +481,11 @@ def cmd_put(args):
         print(f"Uploaded {args.local} -> {remote_path} ({len(content)} bytes verified)")
     else:
         port = args.port or find_port()
-        run(['cp', args.local, args.remote], port, capture=False)
-        local_size = Path(args.local).stat().st_size
         remote_path = args.remote.lstrip(':')
-        if not getattr(args, 'no_verify', False):
-            _verify_remote_size_serial(port, remote_path, local_size)
-            print(f"Uploaded {args.local} -> {remote_path} ({local_size} bytes verified)")
+        verify = not getattr(args, 'no_verify', False)
+        size = _write_and_verify(port, args.local, remote_path, verify=verify)
+        if verify:
+            print(f"Uploaded {args.local} -> {remote_path} ({size} bytes verified)")
         else:
             print(f"Uploaded {args.local} -> {remote_path} (unverified)")
 
@@ -473,44 +529,57 @@ def cmd_flash(args):
 
 
 def cmd_reset(args):
-    """用 RTS 硬复位抢回被自启脚本独占的串口。
+    """用 RTS 复位抢回被自启脚本独占的串口。
 
     自启脚本（boot.py/main.py 里的死循环）会抓住串口不放，Ctrl-C 和
-    enter_raw_repl 都抢不回来。这里借 esptool 的复位策略拉 EN 引脚，
-    物理复位芯片，趁启动窗口期拿回控制权。
+    enter_raw_repl 都抢不回来。这里拉 EN 引脚物理复位芯片，趁启动窗口期
+    拿回控制权。
+
+    加 --grab 会在复位后立刻尝试进入 raw REPL 并保持住会话；不带 --grab
+    则只复位就返回，串口随后会被自启脚本重新占回去。
     """
     import os
     import serial
     import time
 
     port = args.port or find_port()
-    s = serial.Serial(port, 115200, timeout=0.2)
+    s = serial.Serial(port, 115200, timeout=0.1)
     try:
-        if args.soft:
-            print(f"Soft resetting {port} via RTS pin...")
-            s.dtr = False
-            s.rts = True   # EN 拉低
-            time.sleep(0.1)
-            s.rts = False  # EN 释放，芯片重启
-        else:
-            from esptool.reset import ClassicReset, UnixTightReset
+        if os.name == 'nt' and not args.soft:
+            # Windows 上 USB 转串口桥接对 RTS 时序更敏感，用 esptool 的经典序列
+            from esptool.reset import ClassicReset
 
             print(f"Hard resetting {port} via RTS pin...")
-            if os.name == 'nt':
-                ClassicReset(s)()
-            else:
-                try:
-                    UnixTightReset(s)()
-                except (OSError, AttributeError):
-                    ClassicReset(s)()
+            ClassicReset(s)()
+        else:
+            # 简单的 RTS 拉低-释放：EN 拉低复位芯片，释放后芯片重启。
+            # 实测这比 esptool 的 ClassicReset/UnixTightReset 都可靠——后者会
+            # 多次切换控制线并 sleep，反而错过抢回串口的窗口。
+            print(f"{'Soft' if args.soft else 'Hard'} resetting {port} via RTS pin...")
+            s.dtr = False
+            s.rts = True   # EN 拉低，芯片进入复位
+            time.sleep(0.1)
+            s.rts = False  # EN 释放，芯片重启
     except Exception as e:
         print(f"Warning: RTS reset failed ({e}); press the board's RST button instead.",
               file=sys.stderr)
     finally:
         s.close()
 
-    time.sleep(args.delay)
-    print("Board reset; it is re-running boot.py. Give it a few seconds to boot.")
+    if not getattr(args, 'grab', False):
+        time.sleep(args.delay)
+        print("Board reset; it is re-running boot.py. Give it a few seconds to boot.")
+        return
+
+    # 复位后必须马上开始抢：实测自启脚本约 0.9 秒后就开始刷提示符，
+    # 中途等待太久窗口就过了。
+    print("Reset done; grabbing the serial port back...", file=sys.stderr)
+    try:
+        with _transport(port, soft_reset=False, grab_attempts=args.attempts):
+            print(f"Serial port recovered on {port}.", file=sys.stderr)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_screen(args):
@@ -944,6 +1013,10 @@ def build_parser():
                      help='Use the lightweight RTS toggle instead of the full hard reset')
     rst.add_argument('--delay', type=float, default=2.0,
                      help='Seconds to wait after resetting (default: 2.0)')
+    rst.add_argument('--grab', action='store_true',
+                     help='Grab the serial port back right after resetting')
+    rst.add_argument('--attempts', type=int, default=20,
+                     help='How many times to retry grabbing the port (default: 20)')
     rst.set_defaults(func=cmd_reset)
 
     inst = sub.add_parser('install', parents=[serial_parent], help='Deploy handpy_server to board')
