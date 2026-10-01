@@ -22,20 +22,10 @@ uv pip install -e .
 
 ## 基础命令（串口模式）
 
-### 运行代码
-
-```bash
-# 执行代码字符串
-handpy_tool.py run --code "from mpython import *; rgb[0]=(255,0,0); rgb.write()"
-
-# 运行本地文件
-handpy_tool.py run --file script.py
-```
-
 ### 文件传输
 
 ```bash
-# 上传文件
+# 上传文件（上传后自动回读校验字节数）
 handpy_tool.py put local.py :remote.py
 
 # 下载文件
@@ -44,6 +34,46 @@ handpy_tool.py get :remote.py local.py
 # 列出文件
 handpy_tool.py ls --path /
 ```
+
+`put` 上传后会自动回读板子上的文件大小并与本地比对，不一致会直接报错退出并给出缺了多少字节。
+板子偶尔会因为串口丢字节写出残缺文件，这种情况下复位后程序会起不来，而上传命令本身却"成功"返回。
+需要跳过校验时用 `--no-verify`（例如往 RAM 目标写临时文件时）。
+
+### 运行代码
+
+```bash
+# 执行代码字符串
+handpy_tool.py run --code "from mpython import *; rgb[0]=(255,0,0); rgb.write()"
+
+# 运行本地文件
+handpy_tool.py run --file script.py
+
+# 长时间运行的脚本：默认一直等到脚本结束，不因静默超时被杀
+handpy_tool.py run --file calibrate.py
+
+# 板端脚本要读人工输入时，转发本地 stdin
+handpy_tool.py run --file menu.py --stdin
+
+# 限定最长等待时间（秒，按"板子静默"计）
+handpy_tool.py run --file collect.py --timeout 300
+```
+
+`run` 以流式方式执行：板子的输出边跑边打印，长时间没有输出的脚本不会被误判失败。
+需要按人机交互方式跑脚本时，要么加 `--stdin`，要么把脚本写进 `boot.py` / `main.py` 走开机自启。
+
+### 复位板子
+
+```bash
+# 硬复位（RTS 拉 EN 引脚）
+handpy_tool.py reset
+
+# 轻量复位 + 自定义复位后等待秒数
+handpy_tool.py reset --soft --delay 5
+```
+
+`boot.py` / `main.py` 里的自启死循环会独占串口，此时 `run` / `put` / `get` 全部报
+`could not enter raw repl`，且反复尝试 `enter_raw_repl()` 也抢不回来。
+用 `reset` 做一次物理复位，趁启动窗口期抢回控制权；若复位无效，就手动按板子上的 RST 键。
 
 ### 读取屏幕
 
@@ -219,3 +249,20 @@ CMD 枚举：
 - Linux：检查 `/dev/ttyUSB*` 或 `/dev/ttyACM*`
 - 确认用户有串口权限：`sudo usermod -a -G dialout $USER`
 - 手动指定：`--port /dev/ttyUSB0`
+
+**看起来像失败、其实是正常的情况**：
+
+- `machine.reset()` 执行后出现 `timeout waiting for first EOF reception`：这是**复位成功的信号**，
+  不是错误。板子正在重启，串口随之断开，工具自然等不到结束符。
+- `could not enter raw repl`：板子可能只是**还在启动**。等几秒重试即可；
+  若始终不进，则说明自启脚本正独占串口，用 `handpy-tool reset` 复位。
+
+**上传后程序起不来**：
+先确认 `put` 是否报过校验错误；没有校验过就手动比对：
+
+```bash
+handpy_tool.py run --code "import os; print(os.stat('/remote.py')[6])"
+wc -c local.py
+```
+
+两者不一致说明板子上是残缺文件，重新上传。
