@@ -8,6 +8,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+TMPFILE = Path(__file__).resolve().parent / '_t.py'
 import handpy_tool  # noqa: E402
 
 
@@ -101,7 +102,7 @@ def check(name, cond, detail=""):
 results = []
 
 # 1. put verifies size and succeeds when the board matches
-local = Path('/home/frez79/HandPy-Skill/.claude/worktrees/fix-serial/_t.py')
+local = TMPFILE
 local.write_bytes(b'print("hello")\n' * 40)
 install_fake()
 out = Capture()
@@ -116,7 +117,7 @@ results.append(check("put passes when sizes match", "verified" in out.getvalue()
 local.unlink()
 
 # 2. put must FAIL loudly when the board holds a truncated file
-local = Path('/home/frez79/HandPy-Skill/.claude/worktrees/fix-serial/_t.py')
+local = TMPFILE
 local.write_bytes(b'print("hello")\n' * 40)
 expected = local.stat().st_size
 install_fake(monkey_remote_size=expected - 700)  # simulate silent truncation
@@ -130,7 +131,7 @@ results.append(check("put raises on truncated upload", err is not None and "700"
 local.unlink()
 
 # 3. --no-verify skips the check (escape hatch)
-local = Path('/home/frez79/HandPy-Skill/.claude/worktrees/fix-serial/_t.py')
+local = TMPFILE
 local.write_bytes(b'x' * 1000)
 install_fake(monkey_remote_size=1)
 out = Capture()
