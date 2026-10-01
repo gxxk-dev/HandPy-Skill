@@ -82,7 +82,7 @@ def install_fake(monkey_remote_size=None):
     fake = FakeTransport('/dev/fake', remote_size=monkey_remote_size)
     fake.serial = types.SimpleNamespace(read=lambda n: b"OK", write=lambda b: None,
                                         inWaiting=lambda: 0)
-    handpy_tool.SerialTransport = lambda port, baudrate=115200: fake
+    handpy_tool.SerialTransport = lambda port, baudrate=115200, **kw: fake
     return fake
 
 
