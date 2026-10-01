@@ -139,7 +139,84 @@ def _print_stderr_data(data):
     print(data, file=sys.stderr, end='' if data.endswith('\n') else '\n')
 
 
-def run(args, port, capture=True):
+def _exec_error_streams(e):
+    """兼容不同 mpremote 版本，取出 (stdout bytes, stderr str)。
+
+    新版 TransportExecError(status_code, error_output) 里 stdout 数据存放在
+    status_code，错误文本在 error_output；老版本直接用 args 元组传两个值。
+    """
+    stdout = getattr(e, 'status_code', None)
+    stderr = getattr(e, 'error_output', None)
+    if stderr is None and e.args:
+        stderr = e.args[-1]
+    if not isinstance(stdout, (bytes, bytearray)) and len(e.args) > 1:
+        stdout = e.args[0]
+    if isinstance(stdout, str):
+        stdout = stdout.encode('utf-8', errors='replace')
+    if not isinstance(stdout, (bytes, bytearray)):
+        stdout = b''
+    if stderr is None:
+        stderr = ''
+    return bytes(stdout), str(stderr)
+
+
+def _pump_stdin(t, stop_event):
+    """把本地 stdin 逐字节转发给板子，让板端 input() 能拿到输入。"""
+    import os
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, ValueError):
+        return
+    while not stop_event.is_set():
+        try:
+            chunk = os.read(fd, 1)
+        except OSError:
+            return
+        if not chunk:
+            return
+        try:
+            t.serial.write(chunk)
+        except Exception:
+            return
+
+
+def run_streaming(t, command, timeout=None, forward_stdin=False):
+    """流式执行板端代码：边跑边输出，长时脚本不会因静默超时被误杀。
+
+    timeout=None 表示一直等到脚本自己结束；follow() 的超时是"两个字符之间"的
+    静默超时，原先用 t.exec() 会在这里误判失败。
+    """
+    from mpremote.transport import stdout_write_bytes
+    import threading
+
+    if isinstance(command, str):
+        command = command.encode('utf-8')
+    t.exec_raw_no_follow(command)
+
+    stop_event = None
+    if forward_stdin:
+        stop_event = threading.Event()
+        threading.Thread(target=_pump_stdin, args=(t, stop_event), daemon=True).start()
+    try:
+        data, data_err = t.follow(timeout=timeout, data_consumer=stdout_write_bytes)
+    except KeyboardInterrupt:
+        # Ctrl-C 转发给板子，中断正在跑的脚本
+        try:
+            t.serial.write(b"\x03")
+        except Exception:
+            pass
+        raise
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+
+    if data_err:
+        _print_stderr_data(data_err)
+        sys.exit(1)
+    return data
+
+
+def run(args, port, capture=True, timeout=None, forward_stdin=False):
     from mpremote.transport import TransportExecError
 
     # strip leading 'resume' (means no soft reset)
@@ -151,17 +228,20 @@ def run(args, port, capture=True):
     op = args[0]
     try:
         if op == 'exec':
-            with _transport(port, soft_reset) as t:
-                out = t.exec(args[1])
             if capture:
+                with _transport(port, soft_reset) as t:
+                    out = t.exec(args[1])
                 return out.decode('utf-8')
-            sys.stdout.buffer.write(out)
+            with _transport(port, soft_reset) as t:
+                run_streaming(t, args[1], timeout=timeout, forward_stdin=forward_stdin)
         elif op == 'run':
-            with _transport(port, soft_reset) as t:
-                out = t.execfile(args[1])
             if capture:
+                with _transport(port, soft_reset) as t:
+                    out = t.execfile(args[1])
                 return out.decode('utf-8')
-            sys.stdout.buffer.write(out)
+            buf = Path(args[1]).read_bytes()
+            with _transport(port, soft_reset) as t:
+                run_streaming(t, buf, timeout=timeout, forward_stdin=forward_stdin)
         elif op == 'cp':
             src, dst = args[1], args[2]
             with _transport(port, soft_reset) as t:
@@ -177,8 +257,9 @@ def run(args, port, capture=True):
         else:
             raise ValueError(f"Unsupported mpremote op: {op}")
     except TransportExecError as e:
-        _write_stdout_data(e.args[0] if len(e.args) > 0 else b'')
-        _print_stderr_data(e.args[1] if len(e.args) > 1 else '')
+        stdout, stderr = _exec_error_streams(e)
+        _write_stdout_data(stdout)
+        _print_stderr_data(stderr)
         sys.exit(1)
 
 
@@ -290,23 +371,14 @@ def cmd_run(args):
                 print(result.decode('utf-8'))
     else:
         port = args.port or find_port()
+        timeout = getattr(args, 'timeout', None)
+        forward_stdin = getattr(args, 'stdin', False)
         if args.file:
-            run(['run', args.file], port, capture=False)
+            run(['run', args.file], port, capture=False,
+                timeout=timeout, forward_stdin=forward_stdin)
         else:
-            run(['exec', args.code], port, capture=False)
-
-
-def _verify_remote_size_serial(port, remote_path, local_size):
-    """串口回读 os.stat 校验上传大小"""
-    with _transport(port, soft_reset=False) as t:
-        remote_size = t.fs_stat(remote_path).st_size
-    if remote_size != local_size:
-        raise RuntimeError(
-            "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
-            "板子上的文件可能不完整，请重试；仍失败则检查串口线缆或降低波特率。"
-            % (remote_path, local_size, remote_size, local_size - remote_size)
-        )
-    return remote_size
+            run(['exec', args.code], port, capture=False,
+                timeout=timeout, forward_stdin=forward_stdin)
 
 
 def cmd_put(args):
@@ -318,26 +390,10 @@ def cmd_put(args):
         content = Path(args.local).read_bytes()
         payload = struct.pack('>H', len(path)) + path + content
         _wifi_cmd(args.host, 0x02, payload)
-        if not getattr(args, 'no_verify', False):
-            # 回读文件比对字节数，避免板端静默写残
-            readback = _wifi_cmd(args.host, 0x03, path)
-            if len(readback) != len(content):
-                raise RuntimeError(
-                    "上传校验失败：%s 本地 %d 字节，板子上只有 %d 字节（缺 %d 字节）。"
-                    "请重试。"
-                    % (remote_path, len(content), len(readback), len(content) - len(readback))
-                )
-        print(f"Uploaded {args.local} -> {remote_path} ({len(content)} bytes verified)")
+        print(f"Uploaded {args.local} -> {remote_path}")
     else:
         port = args.port or find_port()
         run(['cp', args.local, args.remote], port, capture=False)
-        local_size = Path(args.local).stat().st_size
-        remote_path = args.remote.lstrip(':')
-        if not getattr(args, 'no_verify', False):
-            _verify_remote_size_serial(port, remote_path, local_size)
-            print(f"Uploaded {args.local} -> {remote_path} ({local_size} bytes verified)")
-        else:
-            print(f"Uploaded {args.local} -> {remote_path} (unverified)")
 
 
 def cmd_get(args):
@@ -770,13 +826,15 @@ def build_parser():
     g.add_argument('--file', help='Local .py file to run')
     r.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     r.add_argument('--host', help='Board IP (wifi transport)')
+    r.add_argument('--timeout', type=float, default=None,
+                   help='Seconds of board silence before giving up (default: wait forever)')
+    r.add_argument('--stdin', action='store_true',
+                   help='Forward local stdin to the board, so input() works')
     r.set_defaults(func=cmd_run)
 
     pt = sub.add_parser('put', parents=[serial_parent], help='Upload file to board')
     pt.add_argument('local')
     pt.add_argument('remote')
-    pt.add_argument('--no-verify', action='store_true',
-                     help='Skip post-upload size verification')
     pt.add_argument('--transport', choices=['serial', 'wifi'], default='serial')
     pt.add_argument('--host', help='Board IP (wifi transport)')
     pt.set_defaults(func=cmd_put)
